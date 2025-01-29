@@ -32,7 +32,6 @@ func TestDownloadFile(t *testing.T) {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	// Инициализация gRPC сервера
 	grpcServer := grpc.NewServer()
 	uploadDir := os.Getenv("UPLOAD_DIR_PATH")
 	if len(uploadDir) == 0 {
