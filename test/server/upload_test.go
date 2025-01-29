@@ -39,23 +39,21 @@ func connect() *grpc.ClientConn {
 
 func TestMaxConcurrentUploads(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
-	uploadLimit := rand.Intn(100)
-	increment := rand.Intn(50) + 1
+	uploadLimit := rand.Intn(4)
+	increment := rand.Intn(5)
 
 	uploadInstance := uploadLimit + increment
-	// Создаём слушатель для порта
 	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%s", os.Getenv("APP_PORT")))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	// Инициализация gRPC сервера
 	grpcServer := grpc.NewServer()
 	uploadDir := os.Getenv("UPLOAD_DIR_PATH")
 	if len(uploadDir) == 0 {
 		log.Fatalf("upload dir path is empty")
 	}
-	pb.RegisterFileServiceServer(grpcServer, srv.NewServer(uploadLimit, 10, uploadDir))
+	pb.RegisterFileServiceServer(grpcServer, srv.NewServer(uploadLimit, 0, uploadDir))
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
@@ -82,7 +80,7 @@ func TestMaxConcurrentUploads(t *testing.T) {
 			}
 
 			// Чтение файла из папки uploads_test
-			filePath := fmt.Sprintf("/Users/highjin/GolandProjects/tages/uploads_test/test_file_%d.jpg", fileNum) // Предполагается, что файлы называются file0.txt, file1.txt и т.д.
+			filePath := fmt.Sprintf(os.Getenv("UPLOAD_FROM_DIR_PATH_PATTERN"), fileNum) // Предполагается, что файлы называются file0.txt, file1.txt и т.д.
 			file, err := os.Open(filePath)
 			if err != nil {
 				errChan <- err
@@ -118,5 +116,5 @@ func TestMaxConcurrentUploads(t *testing.T) {
 	wg.Wait()
 
 	// Сравниваем два целых числа
-	assert.Equal(t, uploadLimit-uploadInstance, len(errChan), "Ожидаемые значения должны быть равны")
+	assert.Equal(t, increment, len(errChan), "Ожидаемые значения должны быть равны")
 }

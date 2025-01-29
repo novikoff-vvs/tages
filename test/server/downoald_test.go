@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	err := godotenv.Load("../.env.test")
+	err := godotenv.Load(".env.test")
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
@@ -27,7 +27,6 @@ func init() {
 
 func TestDownloadFile(t *testing.T) {
 	uploadLimit := rand.Intn(100)
-	// Создаём слушатель для порта
 	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%s", os.Getenv("APP_PORT")))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -57,8 +56,7 @@ func TestDownloadFile(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			// Создаем поток для получения данных
-			stream, err := client.DownloadFile(context.Background(), &pb.FileDownloadRequest{Filename: "test_file_2.jpg"})
+			stream, err := client.DownloadFile(context.Background(), &pb.FileDownloadRequest{Filename: "test_file.jpg"})
 			if err != nil {
 				t.Fatalf("failed to call DownloadFile: %v", err)
 			}

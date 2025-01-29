@@ -18,13 +18,14 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Очень быстро отрабатывает, поэтому можно добавить слип на ListFiles в server
 func TestMaxConcurrentListFiles(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	limit := rand.Intn(100)
 	increment := rand.Intn(50)
 	maxConnections := limit + increment
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", 50052))
+	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%s", os.Getenv("APP_PORT")))
 
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)

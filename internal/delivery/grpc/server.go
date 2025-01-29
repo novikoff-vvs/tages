@@ -42,6 +42,7 @@ func (s *Server) UploadFile(stream pb.FileService_UploadFileServer) error {
 
 	var fileInfo *pb.FileInfo
 	var file *os.File
+	defer file.Close()
 
 	for {
 		req, err := stream.Recv()
@@ -64,12 +65,6 @@ func (s *Server) UploadFile(stream pb.FileService_UploadFileServer) error {
 			if err != nil {
 				return err
 			}
-			defer func(file *os.File) {
-				err := file.Close()
-				if err != nil {
-					log.Printf("failed to close file: %v", err)
-				}
-			}(file)
 
 		case *pb.FileUploadRequest_Chunk:
 			if file == nil {
@@ -128,7 +123,7 @@ func (s *Server) ListFiles(ctx context.Context, req *pb.ListFilesRequest) (*pb.L
 	default:
 		return nil, errors.New("read limit")
 	}
-	time.Sleep(2 * time.Second)
+
 	var files []*pb.FileMetadata
 
 	err := filepath.Walk(s.uploadDir, func(path string, info os.FileInfo, err error) error {
@@ -160,7 +155,7 @@ func (s *Server) ListFiles(ctx context.Context, req *pb.ListFilesRequest) (*pb.L
 func getFileInfo(filePath string) (created, updated syscall.Timespec) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		fmt.Println("Ошибка при получении информации о файле:", err)
+		fmt.Println("get file error:", err)
 		return
 	}
 	stat := fileInfo.Sys().(*syscall.Stat_t)
