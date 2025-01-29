@@ -3,9 +3,12 @@ package grpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"syscall"
 	pb "tages/pkg/contracts/proto"
 	"time"
 
@@ -21,20 +24,20 @@ type Server struct {
 	uploadDir    string
 }
 
-func NewServer(uploadDownloadLimit, listFilesLimit int) *Server {
+func NewServer(uploadDownloadLimit, listFilesLimit int, uploadDir string) *Server {
 	return &Server{
 		uploadSem:    make(chan struct{}, uploadDownloadLimit),
 		listFilesSem: make(chan struct{}, listFilesLimit),
-		uploadDir:    "/Users/highjin/GolandProjects/tages/uploads",
+		uploadDir:    uploadDir,
 	}
 }
 
 func (s *Server) UploadFile(stream pb.FileService_UploadFileServer) error {
 	select {
-	case s.uploadSem <- struct{}{}: // получаем семафор
-		defer func() { <-s.uploadSem }() // освобождаем семафор
+	case s.uploadSem <- struct{}{}:
+		defer func() { <-s.uploadSem }()
 	default:
-		return status.Error(codes.ResourceExhausted, "upload limit reached") // канал заполнен
+		return status.Error(codes.ResourceExhausted, "upload limit reached")
 	}
 
 	var fileInfo *pb.FileInfo
@@ -61,7 +64,12 @@ func (s *Server) UploadFile(stream pb.FileService_UploadFileServer) error {
 			if err != nil {
 				return err
 			}
-			defer file.Close()
+			defer func(file *os.File) {
+				err := file.Close()
+				if err != nil {
+					log.Printf("failed to close file: %v", err)
+				}
+			}(file)
 
 		case *pb.FileUploadRequest_Chunk:
 			if file == nil {
@@ -77,10 +85,10 @@ func (s *Server) UploadFile(stream pb.FileService_UploadFileServer) error {
 
 func (s *Server) DownloadFile(req *pb.FileDownloadRequest, stream pb.FileService_DownloadFileServer) error {
 	select {
-	case s.uploadSem <- struct{}{}: // получаем семафор
-		defer func() { <-s.uploadSem }() // освобождаем семафор
+	case s.uploadSem <- struct{}{}:
+		defer func() { <-s.uploadSem }()
 	default:
-		return status.Error(codes.ResourceExhausted, "download limit reached") // канал заполнен
+		return status.Error(codes.ResourceExhausted, "download limit reached")
 	}
 
 	filePath := filepath.Join(s.uploadDir, req.Filename)
@@ -88,9 +96,14 @@ func (s *Server) DownloadFile(req *pb.FileDownloadRequest, stream pb.FileService
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}(file)
 
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 1024*1024)
 	for {
 		n, err := file.Read(buffer)
 		if err == io.EOF {
@@ -99,11 +112,10 @@ func (s *Server) DownloadFile(req *pb.FileDownloadRequest, stream pb.FileService
 		if err != nil {
 			return err
 		}
-
 		if err := stream.Send(&pb.FileDownloadResponse{
 			Chunk: buffer[:n],
 		}); err != nil {
-			return err
+			log.Printf("failed to send chunk: %v", err)
 		}
 	}
 	return nil
@@ -112,24 +124,29 @@ func (s *Server) DownloadFile(req *pb.FileDownloadRequest, stream pb.FileService
 func (s *Server) ListFiles(ctx context.Context, req *pb.ListFilesRequest) (*pb.ListFilesResponse, error) {
 	select {
 	case s.listFilesSem <- struct{}{}: // получаем семафор
-		defer func() { <-s.listFilesSem }() // освобождаем семафор
+		defer func() { <-s.listFilesSem }()
 	default:
-		return nil, errors.New("read limit") // канал заполнен
+		return nil, errors.New("read limit")
 	}
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 	var files []*pb.FileMetadata
 
 	err := filepath.Walk(s.uploadDir, func(path string, info os.FileInfo, err error) error {
+
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
+			c, u := getFileInfo(path)
+			createdAt := timestamppb.New(time.Unix(c.Sec, c.Nsec))
+			updatedAt := timestamppb.New(time.Unix(u.Sec, u.Nsec))
 			files = append(files, &pb.FileMetadata{
 				Filename:  info.Name(),
-				CreatedAt: timestamppb.New(info.ModTime()),
-				UpdatedAt: timestamppb.New(info.ModTime()),
+				CreatedAt: createdAt,
+				UpdatedAt: updatedAt,
 			})
 		}
+
 		return nil
 	})
 
@@ -138,4 +155,18 @@ func (s *Server) ListFiles(ctx context.Context, req *pb.ListFilesRequest) (*pb.L
 	}
 
 	return &pb.ListFilesResponse{Files: files}, nil
+}
+
+func getFileInfo(filePath string) (created, updated syscall.Timespec) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Println("Ошибка при получении информации о файле:", err)
+		return
+	}
+	stat := fileInfo.Sys().(*syscall.Stat_t)
+
+	creationTime := stat.Ctimespec
+	modificationTime := stat.Mtimespec
+
+	return creationTime, modificationTime
 }

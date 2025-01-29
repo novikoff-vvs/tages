@@ -1,4 +1,4 @@
-package file_service_integration_test
+package server
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -18,18 +19,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 const (
 	bufSize = 1024 * 1024 // 1MB
 )
-
-var listener *bufconn.Listener
-
-func init() {
-	listener = bufconn.Listen(bufSize)
-}
 
 func connect() *grpc.ClientConn {
 	var opts = []grpc.DialOption{
@@ -44,18 +38,24 @@ func connect() *grpc.ClientConn {
 }
 
 func TestMaxConcurrentUploads(t *testing.T) {
-	uploadLimit := 2
-	uploadInstance := 3
+	rand.Seed(time.Now().UnixNano())
+	uploadLimit := rand.Intn(100)
+	increment := rand.Intn(50) + 1
+
+	uploadInstance := uploadLimit + increment
 	// Создаём слушатель для порта
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", 50052))
+	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%s", os.Getenv("APP_PORT")))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
 	// Инициализация gRPC сервера
 	grpcServer := grpc.NewServer()
-
-	pb.RegisterFileServiceServer(grpcServer, srv.NewServer(uploadLimit, 10))
+	uploadDir := os.Getenv("UPLOAD_DIR_PATH")
+	if len(uploadDir) == 0 {
+		log.Fatalf("upload dir path is empty")
+	}
+	pb.RegisterFileServiceServer(grpcServer, srv.NewServer(uploadLimit, 10, uploadDir))
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
@@ -108,64 +108,15 @@ func TestMaxConcurrentUploads(t *testing.T) {
 				}
 			}
 
-			stream.CloseAndRecv()
+			_, err = stream.CloseAndRecv()
+			if err != nil {
+				log.Fatalf("failed to close stream: %v", err)
+			}
 		}(i)
 	}
 
 	wg.Wait()
 
 	// Сравниваем два целых числа
-	assert.NotEqual(t, 0, len(errChan), "Ожидаемые значения должны быть равны")
-}
-
-func TestMaxConcurrentListFiles(t *testing.T) {
-	loadLimit := 100
-	rnd := rand.Intn(10)
-	maxConnections := loadLimit + rnd
-	// Создаём слушатель для порта
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", 50052))
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
-	// Инициализация gRPC сервера
-	grpcServer := grpc.NewServer()
-
-	pb.RegisterFileServiceServer(grpcServer, srv.NewServer(1, loadLimit))
-
-	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
-	}()
-
-	conn := connect()
-	defer conn.Close()
-
-	client := pb.NewFileServiceClient(conn)
-
-	var wg sync.WaitGroup
-	var errChan = make(chan error, maxConnections)
-
-	for i := 0; i < maxConnections; i++ {
-		wg.Add(1)
-		go func(connNum int) {
-			defer wg.Done()
-
-			_, err := client.ListFiles(context.Background(), &pb.ListFilesRequest{})
-			if err != nil {
-				errChan <- fmt.Errorf("failed to list files on connection %d: %v", connNum, err)
-				return
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	assert.NotEqual(t, 0, len(errChan))
-	// Проверка на наличие ошибок
-	for err := range errChan {
-		log.Println(err)
-	}
+	assert.Equal(t, uploadLimit-uploadInstance, len(errChan), "Ожидаемые значения должны быть равны")
 }

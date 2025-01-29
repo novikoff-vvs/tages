@@ -1,3 +1,5 @@
 uploads/
 uploads_test/
 .idea/
+/test/server/.env.test
+.env
